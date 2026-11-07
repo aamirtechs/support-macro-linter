@@ -1,0 +1,4 @@
+Calm down, as I already told you, you should have checked this before writing in.
+Your order {{order_id}} is delayed and the guide is attached, see the guide for details.
+Please fill in [TODO] and confirm with {name} before we proceed. Check https://example.com for updates.
+THIS IS COMPLETELY UNACCEPTABLE AND YOU NEED TO FIX IT RIGHT NOW WITHOUT ANY DELAY AT ALL.

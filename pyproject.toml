@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "support-macro-linter"
+version = "1.0.0"
+description = "Lint a support reply draft before sending it, with a CI gate"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+
+[tool.setuptools]
+py-modules = ["support_macro_linter"]
