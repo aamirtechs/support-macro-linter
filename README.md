@@ -1,4 +1,5 @@
 # support-macro-linter
+**Live tool:** https://aamirtechs.github.io/support-macro-linter/ (runs in your browser, no install)
 
 Lint a support reply draft before sending it. Deterministic
 checks only, no AI, no network, no dependencies. Just Python 3

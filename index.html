@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>support-macro-linter</title>
+<style>
+*{box-sizing:border-box} body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#f6f8fb;color:#17233b}
+header{background:#0b1f3a;color:#fff;padding:28px 20px;border-bottom:4px solid #d4a72c}
+header .wrap, main{max-width:900px;margin:0 auto}
+header h1{margin:0 0 6px;font-size:28px} header p{margin:0;color:#cfd9e8}
+main{padding:22px 16px 40px}
+.card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 10px rgba(11,31,58,.08)}
+label{font-weight:600;display:block;margin:14px 0 6px}
+textarea{width:100%;min-height:170px;padding:10px;border:1px solid #c9d3e0;border-radius:8px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px}
+textarea.small{min-height:90px}
+input[type=text],input[type=number],select{padding:8px 10px;border:1px solid #c9d3e0;border-radius:8px;max-width:100%}
+.row{display:flex;flex-wrap:wrap;gap:14px} .row>div{flex:1 1 180px}
+button{background:#0b1f3a;color:#fff;border:0;border-radius:8px;padding:10px 18px;cursor:pointer;font-size:15px}
+button.accent{background:#d4a72c;color:#17233b;font-weight:700}
+button.secondary{background:#e7edf5;color:#0b1f3a}
+.btns{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
+pre{background:#0b1f3a;color:#eef3fa;border-radius:10px;padding:16px;overflow:auto;white-space:pre-wrap;min-height:120px;font-size:13px}
+footer{max-width:900px;margin:0 auto;padding:0 16px 30px;color:#5a6a82;font-size:14px}
+a{color:#0b1f3a}
+.note{color:#5a6a82;font-size:13px}
+.checkline{font-weight:400;display:flex;gap:8px;align-items:center;margin-top:14px}
+</style>
+</head>
+<body>
+<header><div class="wrap"><h1>support-macro-linter</h1><p>Lint a support reply draft before sending it. Deterministic checks only, no AI, no network.</p></div></header>
+<main>
+<div class="card">
+<label for="file">Choose a file</label>
+<input type="file" id="file">
+<label for="input">Reply draft text</label>
+<textarea id="input" placeholder="Paste the draft here, choose a file, or load a sample."></textarea>
+<label class="checkline"><input type="checkbox" id="json"> JSON output (CLI --json)</label>
+<div class="btns">
+<button class="accent" id="run">Run</button>
+<button class="secondary" id="sample">Load sample</button>
+<button class="secondary" id="sample2">Load clean sample</button>
+<button class="secondary" id="download">Download report</button>
+</div>
+<label for="output">Report</label>
+<pre id="output">Press Run to see the report.</pre>
+</div>
+</main>
+<footer>
+<p>Built by AamirTechs. <a href="https://aamirtechs.github.io/">All tools</a> | <a href="https://github.com/aamirtechs/support-macro-linter">Source</a></p>
+<p>Privacy: this tool runs 100% in your browser, nothing is uploaded.</p>
+</footer>
+<script id="core">
+
+var TONE_PHRASES = [
+  ["calm down","tone-calm-down","Tells the customer how to feel. Replace it with an acknowledgement."],
+  ["as i already told you","tone-dismissive","Sounds dismissive. Restate the point without referencing repetition."],
+  ["as i said before","tone-dismissive","Sounds dismissive. Restate the point without referencing repetition."],
+  ["i already told you","tone-dismissive","Sounds dismissive. Restate the point without referencing repetition."],
+  ["you should have","tone-blame","Blames the customer. Describe the next step instead."],
+  ["it is your fault","tone-blame","Blames the customer. Describe what will happen next instead."],
+  ["it's your fault","tone-blame","Blames the customer. Describe what will happen next instead."],
+  ["your fault","tone-blame","Blames the customer. Describe what will happen next instead."],
+  ["not my problem","tone-blame","Refuses ownership. Say who will handle it and by when."],
+  ["you never","tone-blame","Absolute blame language. Stick to the specific event."],
+  ["you always","tone-blame","Absolute blame language. Stick to the specific event."]
+];
+var LINK_PROMISES = ["see the guide","see guide","check the link","link below","link above","follow the link","attached","attachment","see the attachment","i have attached","i've attached","guide attached","document attached"];
+var GREETING_RE = /^(hi|hello|hey|dear|good morning|good afternoon|good evening)\b/i;
+var CLOSING_RE = /^(thanks|thank you|regards|best regards|kind regards|warm regards|best wishes|sincerely|cheers|take care|best)\b/i;
+var URL_RE = /https?:\/\/[^\s<>\])]+/;
+var PLACEHOLDER_URL_RE = /(https?:\/\/)?(www\.)?(example\.(com|org|net)|placeholder\.com|yourdomain\.com|insert-link-here|your-link-here)\b/i;
+var LONG_PARAGRAPH_WORDS = 150;
+function pyReprStr(s){
+  if(s.indexOf("'") >= 0 && s.indexOf('"') < 0) return '"' + s + '"';
+  return "'" + s.replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
+}
+function pySplitlines(text){
+  if(text === "") return [];
+  var parts = text.split(/\r\n|[\n\r\v\f\x85\u2028\u2029]/);
+  if(/[\n\r\v\f\x85\u2028\u2029]$/.test(text)) parts.pop();
+  return parts;
+}
+function lintText(text){
+  var lines = pySplitlines(text);
+  var findings = [];
+  function F(line, rule, severity, message, suggestion){ findings.push({"line": line, "rule": rule, "severity": severity, "message": message, "suggestion": suggestion}); }
+  var hasRealUrl = URL_RE.test(text);
+  var hasPlaceholderUrl = PLACEHOLDER_URL_RE.test(text);
+  lines.forEach(function(line, idx){
+    var index = idx + 1;
+    var lowered = line.toLowerCase();
+    var matched = TONE_PHRASES.filter(function(t){ return lowered.indexOf(t[0]) >= 0; });
+    matched = matched.filter(function(t){
+      return !matched.some(function(u){ return u[0] !== t[0] && u[0].indexOf(t[0]) >= 0; });
+    });
+    matched.forEach(function(t){
+      F(index, t[1], "warning", "Tone risk: phrase " + pyReprStr(t[0]) + " can read as dismissive or blaming.", t[2]);
+    });
+    if(/\b[A-Z]{2,}\b(?:[\s,;:]+[A-Z]{2,}\b){3,}/.test(line))
+      F(index, "tone-shouting", "warning", "Long run of all-caps words reads as shouting.", "Rewrite in normal sentence case, keeping acronyms only.");
+    var m;
+    var db = /\{\{[^{}]*\}\}/g;
+    while((m = db.exec(line)) !== null)
+      F(index, "placeholder-double-brace", "error", "Unresolved placeholder " + pyReprStr(m[0]) + ".", "Fill in the value or remove the placeholder.");
+    var dbr = /\[\[[^\]]*\]\]/g;
+    while((m = dbr.exec(line)) !== null)
+      F(index, "placeholder-double-bracket", "error", "Unresolved placeholder " + pyReprStr(m[0]) + ".", "Fill in the value or remove the placeholder.");
+    var stripped = line.replace(/\{\{[^{}]*\}\}/g, "");
+    var sb = /\{[A-Za-z_][A-Za-z0-9_]*\}/g;
+    while((m = sb.exec(stripped)) !== null)
+      F(index, "placeholder-brace-token", "error", "Unfilled token " + pyReprStr(m[0]) + ".", "Replace the token with the real value.");
+    if(/\[TODO\]/i.test(line))
+      F(index, "placeholder-todo", "error", "Unresolved [TODO] marker.", "Finish the item and remove the marker.");
+    if(/\bTBD\b/.test(line))
+      F(index, "placeholder-tbd", "error", "Unresolved TBD marker.", "Fill in the missing detail or remove the marker.");
+    if(/\bXXX\b/.test(line))
+      F(index, "placeholder-xxx", "error", "Unresolved XXX marker.", "Fill in the missing detail or remove the marker.");
+    for(var i = 0; i < LINK_PROMISES.length; i++){
+      var phrase = LINK_PROMISES[i];
+      if(lowered.indexOf(phrase) >= 0 && !hasRealUrl && !hasPlaceholderUrl){
+        F(index, "missing-link", "error", "Promises a link, guide, or attachment (" + pyReprStr(phrase) + ") but the draft contains no URL.", "Add the real URL, or remove the promise.");
+        break;
+      }
+    }
+    if(PLACEHOLDER_URL_RE.test(line))
+      F(index, "placeholder-url", "error", "Placeholder URL, not a real link.", "Replace it with the real URL before sending.");
+  });
+  var nonEmpty = [];
+  lines.forEach(function(line, idx){ if(line.trim() !== "") nonEmpty.push([idx + 1, line]); });
+  if(nonEmpty.length){
+    var firstNo = nonEmpty[0][0];
+    var firstLine = nonEmpty[0][1].trim();
+    if(!GREETING_RE.test(firstLine))
+      F(firstNo, "structure-no-greeting", "warning", "Draft does not start with a greeting.", "Start with Hi, Hello, or Dear followed by the name.");
+    var lastNo = nonEmpty[nonEmpty.length - 1][0];
+    var tail = nonEmpty.slice(-3).map(function(p){ return p[1].trim(); });
+    if(!tail.some(function(l){ return CLOSING_RE.test(l); }))
+      F(lastNo, "structure-no-closing", "warning", "Draft has no closing or sign-off.", "End with Thanks, Best regards, or a similar sign-off.");
+  }
+  var paraStart = null, paraWords = 0;
+  function flushPara(){
+    if(paraWords > LONG_PARAGRAPH_WORDS)
+      F(paraStart, "structure-long-paragraph", "warning", "Single paragraph has " + paraWords + " words, over the " + LONG_PARAGRAPH_WORDS + " word limit.", "Split it into shorter paragraphs, one point each.");
+  }
+  lines.forEach(function(line, idx){
+    var index = idx + 1;
+    if(line.trim() === ""){ flushPara(); paraStart = null; paraWords = 0; }
+    else {
+      if(paraStart === null) paraStart = index;
+      paraWords += line.trim().split(/\s+/).length;
+    }
+  });
+  flushPara();
+  findings.sort(function(a, b){
+    if(a.line !== b.line) return a.line - b.line;
+    return a.rule < b.rule ? -1 : a.rule > b.rule ? 1 : 0;
+  });
+  return findings;
+}
+function formatText(findings){
+  if(!findings.length) return "No findings. Draft looks ready to send.";
+  return findings.map(function(item){
+    return "L" + item.line + " [" + item.rule + "] " + item.severity + ": " + item.message + " Suggestion: " + item.suggestion;
+  }).join("\n");
+}
+window.runTool = function(inputText, options){
+  options = options || {};
+  var findings = lintText(String(inputText == null ? "" : inputText));
+  if(options.json){
+    var counts = {"error": 0, "warning": 0};
+    findings.forEach(function(f){ counts[f.severity]++; });
+    return JSON.stringify({"findings": findings, "counts": counts, "total": findings.length}, null, 2);
+  }
+  return formatText(findings);
+};
+
+</script>
+<script>
+var SAMPLE = `Calm down, as I already told you, you should have checked this before writing in.
+Your order {{order_id}} is delayed and the guide is attached, see the guide for details.
+Please fill in [TODO] and confirm with {name} before we proceed. Check https://example.com for updates.
+THIS IS COMPLETELY UNACCEPTABLE AND YOU NEED TO FIX IT RIGHT NOW WITHOUT ANY DELAY AT ALL.
+`;
+var SAMPLE_GOOD = `Hi Sarah,
+
+Thanks for reaching out, and sorry for the delay on order 1042.
+
+We have checked your order and it is now on its way. You can track it here: https://shop.test/orders/1042
+
+Please let us know if anything else comes up.
+
+Thanks,
+Amir
+`;
+var inputEl = document.getElementById("input");
+var outputEl = document.getElementById("output");
+document.getElementById("file").addEventListener("change", function(ev){
+  var f = ev.target.files[0]; if(!f) return;
+  var r = new FileReader(); r.onload = function(){ inputEl.value = r.result; }; r.readAsText(f);
+});
+function gatherOptions(){ return { json: document.getElementById("json").checked }; }
+document.getElementById("run").addEventListener("click", function(){
+  try { outputEl.textContent = window.runTool(inputEl.value, gatherOptions()); }
+  catch(e){ outputEl.textContent = "Error: " + e.message; }
+});
+document.getElementById("sample").addEventListener("click", function(){
+  inputEl.value = SAMPLE;
+  if (window.onSample) window.onSample();
+});
+document.getElementById("download").addEventListener("click", function(){
+  var blob = new Blob([outputEl.textContent], {type:"text/plain"});
+  var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "report.txt"; a.click(); URL.revokeObjectURL(a.href);
+});
+document.getElementById("sample2").addEventListener("click", function(){ inputEl.value = SAMPLE_GOOD; });
+</script>
+</body>
+</html>
